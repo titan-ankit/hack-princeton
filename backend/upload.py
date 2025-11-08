@@ -21,8 +21,8 @@ FAISS_PATH = "faiss_index"
 storage = Storage(path=FAISS_PATH, database=db_session)
 
 # --- Data Directories ---
-ACTS_DIR = Path(__file__).parent.parent / "vermont_acts_2026"
-JOURNALS_DIR = Path(__file__).parent.parent / "vermont_journals_2026"
+ACTS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_acts_2026"
+JOURNALS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_journals_2026"
 
 # --- Metadata Extraction ---
 def get_act_metadata(file_path: Path) -> dict:
@@ -45,19 +45,12 @@ def get_journal_metadata(file_path: Path) -> dict:
     if filename.lower().startswith('j'):
         chamber = 'joint'
 
-    source_url = ""
-    if chamber == 'senate':
-        source_url = "https://legislature.vermont.gov/senate/service/2026/journal"
-    elif chamber == 'house':
-        source_url = "https://legislature.vermont.gov/house/service/2026/journal"
-    elif chamber == 'joint':
-        source_url = "https://legislature.vermont.gov/house/service/2026/joint-assembly"
+    source_url = f"https://legislature.vermont.gov/Documents/2026/Docs/JOURNAL/{filename}"
 
     date_match = re.search(r'\d{2}(\d{2})(\d{2})', filename)
     journal_date = None
     if date_match:
         month, day = date_match.groups()
-        # Assuming the year is 2026 from the folder name context
         year = 2026
         try:
             journal_date = datetime(year, int(month), int(day)).date()
@@ -68,7 +61,7 @@ def get_journal_metadata(file_path: Path) -> dict:
 
     return {
         "file_name": filename,
-        "source_url": source_url, # This is the page URL, not the PDF URL. Best effort.
+        "source_url": source_url,
         "chamber": chamber,
         "journal_date": journal_date,
         "bill_number": None,
