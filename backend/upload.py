@@ -2,11 +2,13 @@ import os
 from pathlib import Path
 import re
 from datetime import datetime
+import json
+from langchain_core.documents import Document
 
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
-from load import Storage, PDF
+from load import Storage, PDF, text_splitter
 from db import Base, ChunkMetadata
 
 # --- Database Setup ---
@@ -23,6 +25,7 @@ storage = Storage(path=FAISS_PATH, database=db_session)
 # --- Data Directories ---
 ACTS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_acts_2026"
 JOURNALS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_journals_2026"
+TRANSCRIPTS_PATH = Path(__file__).parent.parent / "scraping/vermont_transcripts_clean.json"
 
 # --- Metadata Extraction ---
 def get_act_metadata(file_path: Path) -> dict:
@@ -69,6 +72,29 @@ def get_journal_metadata(file_path: Path) -> dict:
         "as_enacted": None,
     }
 
+def get_transcript_metadata(transcript_entry: dict, chamber: str) -> dict:
+    # The user specified to ignore committee name, but include date, time, and url
+    date_str = transcript_entry.get("date")
+    time_str = transcript_entry.get("time")
+    
+    journal_date = None
+    if date_str:
+        try:
+            journal_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            print(f"Warning: Could not parse date '{date_str}' from transcript entry.")
+
+    return {
+        "file_name": transcript_entry.get("url"), # Using URL as a unique identifier for file_name
+        "source_url": transcript_entry.get("url"),
+        "chamber": chamber,
+        "journal_date": journal_date,
+        "meeting_time": time_str, # New metadata field for time
+        "bill_number": None,
+        "act_summary": None,
+        "as_enacted": None,
+    }
+
 # --- Main Upload Logic ---
 def upload_files():
     # Process Acts
@@ -92,6 +118,25 @@ def upload_files():
             print(f"Processing {pdf_path}...")
             metadata = get_journal_metadata(pdf_path)
             PDF(str(pdf_path), storage, metadata)
+
+    # Process Transcripts
+    print("Processing transcripts...")
+    if not TRANSCRIPTS_PATH.exists():
+        print(f"Warning: File not found: {TRANSCRIPTS_PATH}")
+    else:
+        with open(TRANSCRIPTS_PATH, 'r') as f:
+            all_transcripts_data = json.load(f)
+        
+        for chamber_name, committees in all_transcripts_data.items():
+            for committee_abbr, transcript_list in committees.items():
+                for transcript_entry in transcript_list:
+                    if transcript_entry.get('transcript'):
+                        doc = Document(page_content=transcript_entry['transcript'])
+                        metadata = get_transcript_metadata(transcript_entry, chamber_name)
+                        doc.metadata.update(metadata)
+                        splits = text_splitter.split_documents([doc])
+                        storage.add_documents(documents=splits, metadata=metadata)
+                        print(f"Processing transcript from {transcript_entry.get('url')} (Chamber: {chamber_name}, Committee: {committee_abbr})")
 
     print("Upload complete.")
 
