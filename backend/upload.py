@@ -25,7 +25,7 @@ storage = Storage(path=FAISS_PATH, database=db_session)
 # --- Data Directories ---
 ACTS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_acts_2026"
 JOURNALS_DIR = Path(__file__).parent.parent / "scraped_data/vermont_journals_2026"
-TRANSCRIPTS_PATH = Path(__file__).parent.parent / "scraping/vermont_transcripts_clean.json"
+TRANSCRIPTS_PATH = Path(__file__).parent.parent / "scraped_data/vermont_transcripts_clean.json"
 
 # --- Metadata Extraction ---
 def get_act_metadata(file_path: Path) -> dict:
