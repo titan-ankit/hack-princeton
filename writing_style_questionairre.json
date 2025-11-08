@@ -1,0 +1,39 @@
+{
+  "reading_level_onboarding": {
+    "title": "Select Your Relay Reading Style",
+    "app_name": "Relay",
+    "main_prompt": "Welcome to Relay! Please read the three summaries below, which all describe the same new law on property tax adjustments. Which style of writing and level of detail do you prefer to receive your personalized updates in?",
+    "options": [
+      {
+        "id": "A",
+        "label": "Simple: Action-Focused",
+        "description": "Concise and action-focused. Targets quick facts and direct impacts using common vocabulary.",
+        "target_level_keywords": "Simple, Grade 6-8, high readability, active voice, minimal jargon.",
+        "summary_text": {
+          "title": "New Law Creates Tax Credit.",
+          "body": "Vermont passed a new law to help homeowners save money on property taxes. If you live in your home full-time (your 'homestead'), you can now get a new $500 state tax credit. This credit lowers your annual school tax bill. To pay for this, the tax rate on second homes and rental properties (called 'non-homestead' properties) will go up slightly."
+        }
+      },
+      {
+        "id": "B",
+        "label": "Intermediate: Balanced & Contextual",
+        "description": "Balanced and contextual. Targets the general civically engaged reader, using standard policy terms and providing background information.",
+        "target_level_keywords": "Intermediate, Grade 10-12, balanced sentence structure, standard policy vocabulary (e.g., 'revenue-neutral', 'enactment').",
+        "summary_text": {
+          "title": "Property Tax System Adjusted.",
+          "body": "The legislature has passed a new bill to adjust the state's property tax system. The new law creates a $500 'Property Tax Credit' for all owner-occupied primary residences (homesteads). This policy is intended to lower the education tax burden on Vermont homeowners. To keep the bill revenue-neutral, the cost will be offset by a minor increase to the 'non-homestead' tax rate, which applies to second homes and investment properties."
+        }
+      },
+      {
+        "id": "C",
+        "label": "Technical: Precise & Legislative",
+        "description": "Precise and legislative. Targets professionals or policy students, using technical jargon and retaining specific bill and statute references.",
+        "target_level_keywords": "Technical, professional/policy level, retain exact bill numbers, use legal terms ('pursuant to', 'notwithstanding', 'statute'), complex sentences.",
+        "summary_text": {
+          "title": "Amendments to 32 V.S.A. § 6066a.",
+          "body": "The General Assembly has enacted legislation that amends how education property taxes are calculated. This bill modifies the Property Tax Credit available to properties qualifying as a 'homestead' (primary domicile) pursuant to 32 V.S.A. § 6066a. This $500 credit is applied directly against the owner's annual statewide education tax liability. The revenue impact is offset by a corresponding adjustment to the non-homestead rate and the application of a new 'Statewide Adjustment' (SA) to the Common Level of Appraisal (CLA)."
+        }
+      }
+    ]
+  }
+}
