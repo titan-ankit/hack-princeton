@@ -223,3 +223,55 @@ success_count = 0
         print("="*70)
         print(f"✓ Successfully scraped: {success_count} new meetings")
         print(f"❌ Failed: {failure_count} meetings")
+
+success_count = 0
+        failure_count = 0
+
+        print(f"\n🚀 Starting scraper with {MAX_WORKERS} concurrent workers...")
+
+        # 3. Run the concurrent scraper
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_task = {executor.submit(scrape_single_meeting_url, task): task for task in tasks_to_run}
+            
+            # Use tqdm for progress bar in the terminal
+            for future in tqdm(as_completed(future_to_task), total=total_tasks, desc="Scraping New Meetings"):
+                
+                committee_full_name, url, meeting_info, transcript_or_error = future.result()
+
+                if meeting_info and transcript_or_error:
+                    # --- Success ---
+                    success_count += 1
+                    
+                    # Split "Senate - Ag" into "Senate" and "Ag"
+                    chamber, committee_simple_name = committee_full_name.split(" - ", 1)
+                    
+                    # Ensure chamber is initialized
+                    if chamber not in final_data_structure:
+                        final_data_structure[chamber] = {}
+                    
+                    # Ensure committee list is initialized (will overwrite if already initialized as empty in step 2)
+                    if committee_simple_name not in final_data_structure[chamber]:
+                        final_data_structure[chamber][committee_simple_name] = []
+                    
+                    # Create the final meeting object
+                    meeting_data = {
+                        "date": meeting_info.get('date', 'Unknown'),
+                        "time": meeting_info.get('time', 'Unknown'),
+                        "url": url,
+                        "committee_original": committee_full_name,
+                        "scraped_at_utc": datetime.utcnow().isoformat(),
+                        "transcript": transcript_or_error
+                    }
+                    
+                    final_data_structure[chamber][committee_simple_name].append(meeting_data)
+                    
+                else:
+                    # --- Failure ---
+                    failure_count += 1
+                    print(f"\n⚠️ Failed to scrape {url}: {transcript_or_error}", file=sys.stderr)
+        
+        print("\n" + "="*70)
+        print("SCRAPING COMPLETE")
+        print("="*70)
+        print(f"✓ Successfully scraped: {success_count} new meetings")
+        print(f"❌ Failed: {failure_count} meetings")
