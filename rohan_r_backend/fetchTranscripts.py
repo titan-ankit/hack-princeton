@@ -275,3 +275,22 @@ success_count = 0
         print("="*70)
         print(f"✓ Successfully scraped: {success_count} new meetings")
         print(f"❌ Failed: {failure_count} meetings")
+
+
+# 4. --- Save Final JSON File ---
+    print(f"\n📁 Saving all new transcript data to '{OUTPUT_FILE}'...")
+    
+    try:
+        # We save to the new OUTPUT_FILE
+        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+            # We dump the final_data_structure which contains the nested transcripts
+            json.dump(final_data_structure, f, indent=2)
+        
+        print(f"✓ Data saved successfully to '{OUTPUT_FILE}'.")
+        
+    except Exception as e:
+        print(f"❌ Failed to save file: {e}")
+        traceback.print_exc(file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
