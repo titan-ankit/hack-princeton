@@ -152,12 +152,12 @@ export function Chat({
 }: ChatProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { data: session, status: authStatus } = useSession();
+  const { data: session, status } = useSession();
+  const authStatus = status;
   const { resolvedTheme, setTheme } = useTheme();
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading">("idle");
   const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(true);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -306,7 +306,6 @@ export function Chat({
 
   const currentTheme = resolvedTheme === "dark" ? "dark" : "light";
   const nextThemeLabel = currentTheme === "dark" ? "Light" : "Dark";
-
   const handleToggleTheme = useCallback(() => {
     setTheme(currentTheme === "dark" ? "light" : "dark");
     setIsUserMenuOpen(false);
@@ -321,7 +320,7 @@ export function Chat({
   const handleSignOut = useCallback(() => {
     setIsUserMenuOpen(false);
     signOut({
-      redirectTo: "/",
+      redirectTo: "/login",
     });
   }, [signOut]);
 
@@ -343,7 +342,6 @@ export function Chat({
       };
 
       setMessages((prev) => [...prev, userMessage]);
-      setStatus("loading");
 
       try {
         const response = await fetch(backendEndpoint, {
@@ -404,10 +402,9 @@ export function Chat({
         toast({
           type: "error",
           description:
-            "We couldn't reach the policy analysis service. Please try again.",
+            "We couldn't reach the chat service. Please try again.",
         });
       } finally {
-        setStatus("idle");
       }
     },
     [backendEndpoint, messages]
@@ -523,8 +520,20 @@ export function Chat({
         ) : (
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => setShowLogin(true)}
               className="flex items-center space-x-2 rounded-full border border-gray-700/40 bg-gray-900/80 px-4 py-2 text-sm font-medium text-white shadow-lg transition-all hover:shadow-xl"
+              disabled={status === "loading"}
+              onClick={() => {
+                if (status === "loading") {
+                  toast({
+                    type: "error",
+                    description:
+                      "Checking authentication status, please try again!",
+                  });
+                  return;
+                }
+
+                router.push("/login");
+              }}
               type="button"
             >
               <LogIn className="h-4 w-4" />
