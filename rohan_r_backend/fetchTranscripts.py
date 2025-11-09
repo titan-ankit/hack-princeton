@@ -123,3 +123,51 @@ if not transcript or len(transcript) < 100:
     except Exception as e:
         # Return failure
         return (committee_full_name, url, None, str(e))
+
+
+# --- Main Execution Logic ---
+
+def main():
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ ERROR: Input file '{INPUT_FILE}' not found. Exiting.")
+        print("Please ensure you have run the link update script first to create it.")
+        sys.exit(1)
+
+    print("="*70)
+    print(f"STARTING TRANSCRIPT SCRAPER FOR NEW LINKS")
+    print(f"Input File: {INPUT_FILE}")
+    print(f"Output File: {OUTPUT_FILE}")
+    print("="*70)
+
+    # 1. Load links from the temporary file
+    try:
+        with open(INPUT_FILE, 'r') as f:
+            links_by_committee = json.load(f)
+    except json.JSONDecodeError:
+        print(f"❌ ERROR: Cannot parse JSON from '{INPUT_FILE}'. Exiting.")
+        sys.exit(1)
+
+    # 2. Create a flat list of all tasks (only URLs that need scraping)
+    tasks_to_run = []
+    # This structure is needed to preserve committee grouping, even with empty lists
+    final_data_structure: Dict[str, Dict[str, List[Dict[str, Any]]]] = {"Senate": {}, "House": {}}
+
+    for committee_full_name, urls in links_by_committee.items():
+        if not urls: # If committee had no new links, skip scraping but preserve the empty entry in the final output
+            chamber_key, committee_simple_name = committee_full_name.split(" - ", 1)
+            if chamber_key not in final_data_structure:
+                 final_data_structure[chamber_key] = {}
+            final_data_structure[chamber_key][committee_simple_name] = []
+            continue
+            
+        for url in urls:
+            tasks_to_run.append((committee_full_name, url))
+    
+    total_tasks = len(tasks_to_run)
+    
+    if total_tasks == 0:
+        print("\n✅ No new links were found in the input file. Outputting empty structure.")
+        # If no tasks, the pre-initialized final_data_structure is the result.
+        pass
+    else:
+        print(f"✓ Found {total_tasks} total NEW meeting URLs to scrape.")
