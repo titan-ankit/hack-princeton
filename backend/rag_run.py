@@ -24,22 +24,17 @@ ABSOLUTE_DEFAULT = "/Users/ankitwalishetti/Desktop/Ankit Programming/hack-prince
 FAISS_PATH = os.getenv("FAISS_INDEX_PATH") or ABSOLUTE_DEFAULT
 
 # # Try multiple keys for titles/urls/dates to be robust across corpora
-META_TITLE_KEYS = ["title", "filename", "doc_title", "name"]
-META_URL_KEYS   = ["url", "link", "href", "page_url", "source"]  # keep 'source' (often a file path)
-META_DATE_KEYS  = ["journal_date", "date", "published", "pub_date", "created"]
+META_TITLE_KEYS = ["title", "doc_title", "filename", "name", "heading", "document_title"]
+# put near the top of rag_run.py
 
-def _derive_filename(path_or_url: str) -> str:
-    try:
-        from urllib.parse import urlparse
-        import os as _os
-        if path_or_url.startswith("http"):
-            p = urlparse(path_or_url).path
-            base = _os.path.basename(p)
-        else:
-            base = _os.path.basename(path_or_url)
-        return base or "Untitled"
-    except Exception:
-        return "Untitled"
+META_URL_KEYS   = [
+    "source_url", "url", "document_url", "page_url", "permalink", "href", "link",
+    "web_url", "bill_url", "pdf_url", "html_url", "source"
+]
+META_DATE_KEYS  = ["journal_date", "date", "published", "pub_date", "created", "updated_at"]
+# we’ll custom-build title from file_name / bill_number / chamber / act_summary
+# but keep a few generic fallbacks:
+META_TITLE_FALLBACK_KEYS = ["title", "doc_title", "filename", "name", "heading", "document_title", "id", "doc_id", "slug"]
 
 def _first_meta(meta: dict, keys: list[str]) -> str | None:
     for k in keys:
@@ -50,28 +45,86 @@ def _first_meta(meta: dict, keys: list[str]) -> str | None:
 
 def _format_date(d: str | None) -> str | None:
     if not d: return None
+    from datetime import datetime
     try:
-        from datetime import datetime
         return datetime.fromisoformat(d[:10]).date().isoformat()
     except Exception:
         return d
 
+def _slug_to_title(s: str) -> str:
+    """Turn 'VTHouseEnergyDigitalInfra_2025-05-15_09-03.html' into 'VTHouseEnergyDigitalInfra (2025-05-15 09:03)'."""
+    import os, re
+    base = os.path.basename(s)
+    base = re.sub(r"\.[A-Za-z0-9]+$", "", base)          # drop extension
+    pretty = base.replace("_", " ").strip()
+    pretty = re.sub(r"(\d{4}-\d{2}-\d{2})[_-](\d{2})[-:](\d{2})", r"\1 \2:\3", pretty)
+    return pretty if pretty else "Untitled"
+
+def _compose_title(meta: dict, i: int) -> str:
+    """
+    Make a human-readable title:
+      1) file_name (slug → title)
+      2) chamber + bill_number
+      3) act_summary (shortened)
+      4) fallbacks in META_TITLE_FALLBACK_KEYS
+      5) 'Doc i'
+    """
+    fn = meta.get("file_name")
+    if fn:
+        return _slug_to_title(str(fn))
+
+    chamber = meta.get("chamber")
+    bill    = meta.get("bill_number")
+    if chamber or bill:
+        parts = [p for p in [chamber, bill] if p]
+        return " — ".join(parts)
+
+    summary = meta.get("act_summary")
+    if summary:
+        s = str(summary).strip()
+        return s if len(s) <= 80 else s[:77] + "…"
+
+    fb = _first_meta(meta, META_TITLE_FALLBACK_KEYS)
+    if fb:
+        return fb
+
+    return f"Doc {i}"
+
+def _file_uri_if_path(s: str) -> str:
+    """Convert existing local paths to file:// URIs; leave non-existing strings untouched."""
+    try:
+        from pathlib import Path
+        p = Path(s)
+        if p.exists():
+            return p.resolve().as_uri()
+        return s
+    except Exception:
+        return s
+
 def _pick_top_docs_for_citations(docs, k: int = 10):
-    """Use the same first-k docs for snippets and for citation mapping S1..Sk."""
     return list(docs[:k])
 
 def _build_cited_sources(docs_top: list) -> list[dict]:
-    """Return [{'S':'S1','title':'...','url':'...'}...] with good fallbacks and (date)."""
     out = []
     for i, d in enumerate(docs_top, start=1):
         meta = getattr(d, "metadata", {}) or {}
-        url = _first_meta(meta, META_URL_KEYS) or ""
-        title = _first_meta(meta, META_TITLE_KEYS)
-        if not title:
-            title = _derive_filename(url) if url else f"Doc {i}"
+
+        # URL: prefer source_url (your corpus), then other URL-like keys, then path-like fallback
+        url = _first_meta(meta, META_URL_KEYS)
+        if not url:
+            # try path-ish keys and turn them into file:// if present
+            path_like = _first_meta(meta, ["source", "file_path", "filepath", "path", "pdf_path"])
+            if path_like:
+                url = _file_uri_if_path(path_like)
+
+        # Title: prefer smart composition using your fields
+        title = _compose_title(meta, i)
+
+        # Date
         date = _format_date(_first_meta(meta, META_DATE_KEYS))
         label = f"{title} ({date})" if date else title
-        out.append({"S": f"S{i}", "title": label, "url": url})
+
+        out.append({"S": f"S{i}", "title": label, "url": url or ""})
     return out
 
 # ----------------------------
@@ -249,6 +302,26 @@ def run_rag(
     date_range = [start_date or "", end_date or ""] if (start_date or end_date) else None
     result = storage.rag(question=prompt, schema=None, date_range=date_range)
     docs = result.get("documents", [])
+
+    #
+    # # --- TEMP DEBUG: show what metadata keys exist in your top docs ---
+    # try:
+    #     print("\n[DEBUG] Top doc metadata keys & example values:")
+    #     for i, d in enumerate(docs[:5], start=1):
+    #         meta = getattr(d, "metadata", {}) or {}
+    #         print(f"Doc {i} keys:", sorted(list(meta.keys())))
+    #         # show a couple representative fields if present
+    #         for k in (
+    #         "title", "filename", "name", "source", "url", "link", "href", "page_url", "file_path", "source_url",
+    #         "document_url"):
+    #             if k in meta:
+    #                 print(f"  {k} -> {meta[k]}")
+    #     print()
+    # except Exception as _e:
+    #     pass
+    # # --- END TEMP DEBUG ---
+
+
     resp = result.get("response", "")
 
     if date_range and not docs:
