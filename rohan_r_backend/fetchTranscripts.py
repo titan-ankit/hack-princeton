@@ -74,3 +74,41 @@ if transcript_lines:
         return '\n'.join(transcript_lines)
     
     return "Transcript extraction failed. Fallback: No text found."
+
+# --- Concurrent Scraper Worker ---
+
+def scrape_single_meeting_url(task: tuple) -> tuple:
+    """Worker function to scrape one URL."""
+    committee_full_name, url = task
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        # Increase timeout slightly since we are in a sequential script
+        response = requests.get(url, headers=headers, timeout=30) 
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 1. Get metadata from URL
+        meeting_info = extract_meeting_info_from_url(url)
+        
+        # 2. Try to refine metadata from <title> tag (more accurate)
+        title_tag = soup.find('title')
+        if title_tag and title_tag.string:
+            title_text = title_tag.string
+            # Example: SmartTranscript of Senate Agriculture - 2025-08-13 - 11:04 AM
+            match = re.search(r'SmartTranscript of (.+?) - (\d{4}-\d{2}-\d{2}) - (.+)', title_text)
+            if match:
+                meeting_info = {
+                    'committee': match.group(1).strip(),
+                    'date': match.group(2),
+                    'time': match.group(3).strip(),
+                }
+        
+        if not meeting_info:
+             meeting_info = {'date': 'Unknown', 'time': 'Unknown'}
+
+        # 3. Get transcript
+        transcript = extract_transcript(soup)
