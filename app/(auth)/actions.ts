@@ -56,17 +56,43 @@ export const register = async (
   formData: FormData
 ): Promise<RegisterActionState> => {
   try {
+    // Email and password validation and database logic - UNCHANGED
     const validatedData = authFormSchema.parse({
       email: formData.get("email"),
       password: formData.get("password"),
     });
 
-    const [user] = await getUser(validatedData.email);
+    const [existingUser] = await getUser(validatedData.email);
 
-    if (user) {
+    if (existingUser) {
       return { status: "user_exists" } as RegisterActionState;
     }
-    await createUser(validatedData.email, validatedData.password);
+
+    // Gather profile fields before persisting to the database
+    const selectedTopics = formData.getAll("topics") as string[];
+    const otherTopics = formData.get("otherTopics") as string | null;
+    const readingLevel = formData.get("readingLevel") as string | null;
+    const locations = formData.get("locations") as string | null;
+
+    const isOtherSelected = selectedTopics.includes("other");
+    const combinedTopics = isOtherSelected && otherTopics
+      ? [...selectedTopics.filter((t) => t !== "other"), otherTopics.trim()]
+      : selectedTopics;
+    const normalizedTopics = combinedTopics
+      .map((topic) => topic.trim())
+      .filter((topic) => topic.length > 0);
+    const normalizedLocations = locations?.trim() ?? null;
+    const depth = readingLevel ? Number.parseInt(readingLevel, 10) : null;
+
+    await createUser({
+      email: validatedData.email,
+      password: validatedData.password,
+      locations: normalizedLocations,
+      topics: normalizedTopics,
+      depth: Number.isNaN(depth) ? null : depth,
+    });
+
+    // Sign in logic - UNCHANGED
     await signIn("credentials", {
       email: validatedData.email,
       password: validatedData.password,

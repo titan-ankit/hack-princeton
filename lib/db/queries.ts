@@ -18,7 +18,6 @@ import type { ArtifactKind } from "@/components/artifact";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { ChatSDKError } from "../errors";
 import type { AppUsage } from "../usage";
-import { generateUUID } from "../utils";
 import {
   type Chat,
   chat,
@@ -53,30 +52,33 @@ export async function getUser(email: string): Promise<User[]> {
   }
 }
 
-export async function createUser(email: string, password: string) {
+type CreateUserInput = {
+  email: string;
+  password: string;
+  locations?: string | null;
+  topics?: string[];
+  depth?: number | null;
+};
+
+export async function createUser({
+  email,
+  password,
+  locations,
+  topics,
+  depth,
+}: CreateUserInput) {
   const hashedPassword = generateHashedPassword(password);
 
   try {
-    return await db.insert(user).values({ email, password: hashedPassword });
-  } catch (_error) {
-    throw new ChatSDKError("bad_request:database", "Failed to create user");
-  }
-}
-
-export async function createGuestUser() {
-  const email = `guest-${Date.now()}`;
-  const password = generateHashedPassword(generateUUID());
-
-  try {
-    return await db.insert(user).values({ email, password }).returning({
-      id: user.id,
-      email: user.email,
+    return await db.insert(user).values({
+      email,
+      password: hashedPassword,
+      locations: locations ?? null,
+      topics: topics ?? [],
+      depth: depth ?? null,
     });
   } catch (_error) {
-    throw new ChatSDKError(
-      "bad_request:database",
-      "Failed to create guest user"
-    );
+    throw new ChatSDKError("bad_request:database", "Failed to create user");
   }
 }
 
