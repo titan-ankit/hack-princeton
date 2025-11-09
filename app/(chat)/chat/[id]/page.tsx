@@ -5,7 +5,7 @@ import { auth } from "@/app/(auth)/auth";
 import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
-import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
+import { getChatById, getMessagesByChatId, getUser } from "@/lib/db/queries";
 import { convertToUIMessages } from "@/lib/utils";
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
@@ -39,6 +39,16 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
 
   const uiMessages = convertToUIMessages(messagesFromDb);
 
+  const userEmail = session.user.email;
+  let initialUserTopics: string[] = [];
+
+  if (userEmail) {
+    const [dbUser] = await getUser(userEmail);
+    if (dbUser) {
+      initialUserTopics = dbUser.topics ?? [];
+    }
+  }
+
   const cookieStore = await cookies();
   const chatModelFromCookie = cookieStore.get("chat-model");
 
@@ -52,6 +62,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
           initialLastContext={chat.lastContext ?? undefined}
           initialMessages={uiMessages}
           initialVisibilityType={chat.visibility}
+          initialUserTopics={initialUserTopics}
           isReadonly={session?.user?.id !== chat.userId}
         />
         <DataStreamHandler />
@@ -68,6 +79,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
         initialLastContext={chat.lastContext ?? undefined}
         initialMessages={uiMessages}
         initialVisibilityType={chat.visibility}
+        initialUserTopics={initialUserTopics}
         isReadonly={session?.user?.id !== chat.userId}
       />
       <DataStreamHandler />
