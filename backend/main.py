@@ -1,5 +1,6 @@
 import asyncio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import uvicorn
 import json
@@ -13,12 +14,27 @@ load_dotenv()
 
 app = FastAPI()
 
+origins = [
+    "http://localhost",
+    "http://localhost:3000", # Default for Next.js
+    "http://localhost:8080", # I see this in your old logs
+    # Add your frontend's actual origin if it's different
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       # List of origins that are allowed to make requests
+    allow_credentials=True,      # Allow cookies/authorization headers
+    allow_methods=["*"],         # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],         # Allow all headers
+)
+
 # --- App Initialization ---
-FAISS_PATH = "faiss_index"
+FAISS_PATH = "../faiss_index"
 storage = Storage(path=FAISS_PATH, from_path=True)
 app_graph = create_agent_graph(storage)
 
-with open('backend/prompts.json') as f:
+with open('prompts.json') as f:
     prompts = json.load(f)
 system_prompt = prompts['user_query']
 
@@ -33,7 +49,3 @@ async def user_query_endpoint(user_request: UserQueryRequest):
     response = app_graph.invoke(inputs)
     
     return response['final_response']
-
-if __name__ == "__main__":
-    # To run this, you need to install uvicorn: pip install uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

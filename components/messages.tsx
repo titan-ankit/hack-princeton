@@ -1,4 +1,3 @@
-import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
@@ -10,14 +9,15 @@ import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
+import { Citation } from "./citation";
 
 type MessagesProps = {
   chatId: string;
-  status: UseChatHelpers<ChatMessage>["status"];
+  status: "idle" | "loading";
   votes: Vote[] | undefined;
   messages: ChatMessage[];
-  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
-  regenerate: UseChatHelpers<ChatMessage>["regenerate"];
+  setMessages: (messages: ChatMessage[]) => void;
+  regenerate: () => void;
   isReadonly: boolean;
   isArtifactVisible: boolean;
   selectedModelId: string;
@@ -46,7 +46,7 @@ function PureMessages({
   useDataStream();
 
   useEffect(() => {
-    if (status === "submitted") {
+    if (status === "loading") {
       requestAnimationFrame(() => {
         const container = messagesContainerRef.current;
         if (container) {
@@ -70,29 +70,35 @@ function PureMessages({
           {messages.length === 0 && <Greeting />}
 
           {messages.map((message, index) => (
-            <PreviewMessage
-              chatId={chatId}
-              isLoading={
-                status === "streaming" && messages.length - 1 === index
-              }
-              isReadonly={isReadonly}
-              key={message.id}
-              message={message}
-              regenerate={regenerate}
-              requiresScrollPadding={
-                hasSentMessage && index === messages.length - 1
-              }
-              setMessages={setMessages}
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
-            />
+            <div key={message.id}>
+              <PreviewMessage
+                chatId={chatId}
+                isLoading={
+                  status === "loading" && messages.length - 1 === index
+                }
+                isReadonly={isReadonly}
+                message={message}
+                regenerate={regenerate}
+                requiresScrollPadding={
+                  hasSentMessage && index === messages.length - 1
+                }
+                setMessages={setMessages}
+                vote={
+                  votes
+                    ? votes.find((vote) => vote.messageId === message.id)
+                    : undefined
+                }
+              />
+              {message.parts
+                .filter((part) => part.type === "citation")
+                .map((part, i) => (
+                  <Citation key={i} url={part.text} />
+                ))}
+            </div>
           ))}
 
           <AnimatePresence mode="wait">
-            {status === "submitted" && <ThinkingMessage key="thinking" />}
+            {status === "loading" && <ThinkingMessage key="thinking" />}
           </AnimatePresence>
 
           <div

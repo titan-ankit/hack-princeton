@@ -1,46 +1,42 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
-import { unstable_serialize } from "swr/infinite";
-import { ChatHeader } from "@/components/chat-header";
+import { useRouter, useSearchParams } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useArtifactSelector } from "@/hooks/use-artifact";
-import { useAutoResume } from "@/hooks/use-auto-resume";
-import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import type { Vote } from "@/lib/db/schema";
-import { ChatSDKError } from "@/lib/errors";
-import type { Attachment, ChatMessage } from "@/lib/types";
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ChevronRight,
+  Clock,
+  FileText,
+  Loader2,
+  LogIn,
+  LogOut,
+  Send,
+  Sparkles,
+  User,
+} from "lucide-react";
+import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { cn, fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
-import { Artifact } from "./artifact";
-import { ChatSideContainer } from "./chat-side-container";
-import { useDataStream } from "./data-stream-provider";
-import { getChatHistoryPaginationKey } from "./sidebar-history";
-import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
+import { cn, generateUUID } from "@/lib/utils";
+import { toast } from "./toast";
 
-export function Chat({
-  id,
-  initialMessages,
-  initialChatModel,
-  initialVisibilityType,
-  isReadonly,
-  autoResume,
-  initialLastContext,
-}: {
+type Story = {
+  id: number;
+  title: string;
+  representative: string;
+  alignment: number;
+  category: string;
+  summary: string;
+  timestamp: string;
+};
+
+type ChatProps = {
   id: string;
   initialMessages: ChatMessage[];
   initialChatModel: string;
@@ -48,206 +44,616 @@ export function Chat({
   isReadonly: boolean;
   autoResume: boolean;
   initialLastContext?: AppUsage;
-}) {
-  const { visibilityType } = useChatVisibility({
-    chatId: id,
-    initialVisibilityType,
-  });
+};
 
-  const { mutate } = useSWRConfig();
-  const { setDataStream } = useDataStream();
+type MessagePart = ChatMessage["parts"][number];
 
-  const [input, setInput] = useState<string>("");
-  const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
-  const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel);
-  const currentModelIdRef = useRef(currentModelId);
+const isTextPart = (
+  part: MessagePart
+): part is MessagePart & { type: "text"; text: string } =>
+  part.type === "text" && typeof (part as { text?: unknown }).text === "string";
+
+const isCitationPart = (
+  part: MessagePart
+): part is MessagePart & { type: "citation"; text: string } =>
+  part.type === "citation" &&
+  typeof (part as { text?: unknown }).text === "string";
+
+const normalizeBackendEndpoint = () => {
+  const base =
+    (process.env.NEXT_PUBLIC_BACKEND_URL ??
+      "http://localhost:8000") as string;
+  return `${base.replace(/\/+$/, "")}/user-query`;
+};
+
+const getCitationLabel = (url: string) => {
+  try {
+    const { hostname } = new URL(url);
+    return hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+export function Chat({
+  id,
+  initialMessages,
+  initialChatModel: _initialChatModel,
+  initialVisibilityType: _initialVisibilityType,
+  isReadonly,
+  autoResume: _autoResume,
+  initialLastContext: _initialLastContext,
+}: ChatProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { data: session, status: authStatus } = useSession();
+
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [input, setInput] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading">("idle");
+  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
+  const [isChatExpanded, setIsChatExpanded] = useState(true);
+
+  const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    currentModelIdRef.current = currentModelId;
-  }, [currentModelId]);
+    setMessages(initialMessages);
+  }, [initialMessages]);
 
-  const {
-    messages,
-    setMessages,
-    sendMessage,
-    status,
-    stop,
-    regenerate,
-    resumeStream,
-  } = useChat<ChatMessage>({
-    id,
-    messages: initialMessages,
-    experimental_throttle: 100,
-    generateId: generateUUID,
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-      fetch: fetchWithErrorHandlers,
-      prepareSendMessagesRequest(request) {
-        return {
-          body: {
-            id: request.id,
-            message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibilityType,
-            ...request.body,
-          },
-        };
+  const backendEndpoint = useMemo(() => normalizeBackendEndpoint(), []);
+
+  const categories = useMemo(
+    () => ["All", "Economy", "Healthcare", "Environment", "Education", "Justice"],
+    []
+  );
+
+  const stories = useMemo<Story[]>(
+    () => [
+      {
+        id: 1,
+        title: "Infrastructure Bill Vote Analysis",
+        representative: "Sen. Jane Smith",
+        alignment: 87,
+        category: "Economy",
+        summary:
+          "Voted in favor of infrastructure spending, consistent with campaign promises on job creation.",
+        timestamp: "2 hours ago",
       },
-    }),
-    onData: (dataPart) => {
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
-      if (dataPart.type === "data-usage") {
-        setUsage(dataPart.data);
+      {
+        id: 2,
+        title: "Healthcare Reform Statement",
+        representative: "Rep. John Doe",
+        alignment: 65,
+        category: "Healthcare",
+        summary:
+          "Public statements support expansion, but recent committee votes show mixed record.",
+        timestamp: "5 hours ago",
+      },
+      {
+        id: 3,
+        title: "Climate Policy Update",
+        representative: "Sen. Maria Garcia",
+        alignment: 92,
+        category: "Environment",
+        summary:
+          "Strong alignment between campaign promises and legislative actions on renewable energy.",
+        timestamp: "1 day ago",
+      },
+      {
+        id: 4,
+        title: "Education Funding Vote",
+        representative: "Rep. Michael Chen",
+        alignment: 45,
+        category: "Education",
+        summary:
+          "Voted against increased education funding, citing budget concerns despite campaign commitments.",
+        timestamp: "2 days ago",
+      },
+    ],
+    []
+  );
+
+  const suggestedQuestions = useMemo(
+    () => [
+      "What bills did they vote on?",
+      "Compare promises vs actions",
+      "How do I contact them?",
+      "Show recent updates",
+    ],
+    []
+  );
+
+  const firstName = useMemo(() => {
+    if (session?.user?.name) {
+      return session.user.name.split(" ")[0];
+    }
+    if (session?.user?.email) {
+      return (session.user.email.split("@")[0] ?? "").trim() || "there";
+    }
+    return "there";
+  }, [session?.user?.name, session?.user?.email]);
+
+  const userInitial = useMemo(() => {
+    if (session?.user?.name) {
+      return session.user.name.charAt(0).toUpperCase();
+    }
+    if (session?.user?.email) {
+      return session.user.email.charAt(0).toUpperCase();
+    }
+    return undefined;
+  }, [session?.user?.name, session?.user?.email]);
+
+  const sendMessage = useCallback(
+    async (message: string) => {
+      const trimmed = message.trim();
+
+      if (!trimmed) {
+        return;
       }
-    },
-    onFinish: () => {
-      mutate(unstable_serialize(getChatHistoryPaginationKey));
-    },
-    onError: (error) => {
-      if (error instanceof ChatSDKError) {
-        // Check if it's a credit card error
-        if (
-          error.message?.includes("AI Gateway requires a valid credit card")
-        ) {
-          setShowCreditCardAlert(true);
-        } else {
-          toast({
-            type: "error",
-            description: error.message,
-          });
+
+      const userMessage: ChatMessage = {
+        id: generateUUID(),
+        role: "user",
+        parts: [{ type: "text", text: trimmed }],
+        metadata: { createdAt: new Date().toISOString() },
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
+      setStatus("loading");
+
+      try {
+        const response = await fetch(backendEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ user_query: trimmed }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Backend responded with status ${response.status}`);
         }
+
+        const data = await response.json();
+        const textResponse =
+          typeof data?.text_response === "string"
+            ? data.text_response
+            : "I'm not sure how to respond to that yet.";
+
+        const documents = Array.isArray(data?.documents)
+          ? data.documents
+          : [];
+
+        const citationParts = documents
+          .map((doc: unknown) => {
+            if (
+              doc &&
+              typeof doc === "object" &&
+              "metadata" in doc &&
+              (doc as { metadata?: Record<string, unknown> }).metadata
+            ) {
+              const metadata = (doc as { metadata?: Record<string, unknown> })
+                .metadata;
+              const urlValue =
+                (metadata?.url as string | undefined) ??
+                (metadata?.source as string | undefined);
+              return typeof urlValue === "string" ? urlValue : null;
+            }
+            return null;
+          })
+          .filter((value): value is string => Boolean(value));
+
+        const assistantMessage: ChatMessage = {
+          id: generateUUID(),
+          role: "assistant",
+          parts: [
+            { type: "text", text: textResponse },
+            ...citationParts.map((url) => ({
+              type: "citation" as const,
+              text: url,
+            })),
+          ],
+          metadata: { createdAt: new Date().toISOString() },
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } catch (error) {
+        console.error(error);
+        toast({
+          type: "error",
+          description:
+            "We couldn't reach the policy analysis service. Please try again.",
+        });
+      } finally {
+        setStatus("idle");
       }
     },
-  });
+    [backendEndpoint]
+  );
 
-  const searchParams = useSearchParams();
   const query = searchParams.get("query");
-
-  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
 
   useEffect(() => {
     if (query && !hasAppendedQuery) {
-      sendMessage({
-        role: "user" as const,
-        parts: [{ type: "text", text: query }],
-      });
-
       setHasAppendedQuery(true);
-      window.history.replaceState({}, "", `/chat/${id}`);
+      setInput(query);
+      sendMessage(query);
+
+      if (typeof window !== "undefined") {
+        window.history.replaceState({}, "", `/chat/${id}`);
+      }
     }
-  }, [query, sendMessage, hasAppendedQuery, id]);
+  }, [query, hasAppendedQuery, id, sendMessage]);
 
-  const { data: votes } = useSWR<Vote[]>(
-    messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
-  );
+  useEffect(() => {
+    if (messageEndRef.current) {
+      messageEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, status]);
 
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
-  const [isChatMinimized, setIsChatMinimized] = useState(false);
+  const handleSuggestionClick = (question: string) => {
+    if (isReadonly) {
+      return;
+    }
+    setInput(question);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
 
-  useAutoResume({
-    autoResume,
-    initialMessages,
-    resumeStream,
-    setMessages,
-  });
+  const handleSend = () => {
+    if (isReadonly || status === "loading") {
+      return;
+    }
+
+    const trimmed = input.trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    setInput("");
+    sendMessage(trimmed);
+  };
+
+  const isAuthLoading = authStatus === "loading";
+  const isSendDisabled = status === "loading" || isReadonly;
+  const showSuggestions = messages.length === 0;
 
   return (
-    <>
-      <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
-        <ChatHeader
-          chatId={id}
-          isReadonly={isReadonly}
-          selectedVisibilityType={initialVisibilityType}
-        />
-
-        {/* Main content area - available for other purposes */}
-        <div
-          className={cn(
-            "flex-1 overflow-auto transition-[padding] duration-300 ease-in-out",
-            isChatMinimized ? "pr-[3rem]" : "pr-[28rem]"
-          )}
-        >
-          {/* This area is now available for presenting data */}
-          <div className="mx-auto max-w-7xl px-4 py-8">
-            {/* Your content goes here */}
+    <div className="relative flex h-dvh w-full overflow-hidden bg-black text-white">
+      <div className="fixed left-4 top-4 z-50">
+        {isAuthLoading ? (
+          <div className="flex items-center space-x-3 rounded-full border border-gray-700/40 bg-gray-900/80 px-4 py-2 text-sm text-gray-400 shadow-lg">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Checking session…
           </div>
-        </div>
+        ) : session?.user ? (
+          <div className="flex items-center space-x-3 rounded-full border border-gray-700/40 bg-gray-900/80 px-4 py-2 text-sm text-white shadow-lg">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-600 font-semibold uppercase">
+              {userInitial}
+            </div>
+            <span className="font-medium">
+              {session.user.name ?? session.user.email}
+            </span>
+            <button
+              onClick={() => signOut({ redirectTo: "/" })}
+              className="rounded-full p-1 transition-colors hover:bg-gray-700/50"
+              type="button"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="sr-only">Sign out</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => router.push("/login")}
+            className="flex items-center space-x-2 rounded-full border border-gray-700/40 bg-gray-900/80 px-4 py-2 text-sm font-medium text-white shadow-lg transition-all hover:shadow-xl"
+            type="button"
+          >
+            <LogIn className="h-4 w-4" />
+            <span>Sign In</span>
+          </button>
+        )}
       </div>
 
-      {/* Chat Side Container */}
-      <ChatSideContainer
-        attachments={attachments}
-        chatId={id}
-        input={input}
-        isArtifactVisible={isArtifactVisible}
-        isMinimized={isChatMinimized}
-        isReadonly={isReadonly}
-        messages={messages}
-        onMinimizedChange={setIsChatMinimized}
-        onModelChange={setCurrentModelId}
-        regenerate={regenerate}
-        selectedModelId={currentModelId}
-        selectedVisibilityType={visibilityType}
-        sendMessage={sendMessage}
-        setAttachments={setAttachments}
-        setInput={setInput}
-        setMessages={setMessages}
-        status={status}
-        stop={stop}
-        usage={usage}
-        votes={votes}
-      />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="border-b border-gray-800 bg-gray-950 px-6 py-3.5 shadow-lg">
+          <div className="flex items-center justify-center space-x-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-700 shadow-lg">
+              <FileText className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">
+                Political Transparency
+              </h1>
+              <p className="text-xs text-gray-400">
+                Track what they say vs. what they do
+              </p>
+            </div>
+          </div>
+        </header>
 
-      <Artifact
-        attachments={attachments}
-        chatId={id}
-        input={input}
-        isReadonly={isReadonly}
-        messages={messages}
-        regenerate={regenerate}
-        selectedModelId={currentModelId}
-        selectedVisibilityType={visibilityType}
-        sendMessage={sendMessage}
-        setAttachments={setAttachments}
-        setInput={setInput}
-        setMessages={setMessages}
-        status={status}
-        stop={stop}
-        votes={votes}
-      />
+        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-black via-gray-950/10 to-black px-6 py-6">
+          <div className="mx-auto max-w-4xl">
+            <div className="mb-8">
+              <div className="mb-3 flex items-center space-x-3">
+                <Sparkles className="h-7 w-7 text-gray-400" />
+                <h2 className="text-4xl font-bold text-white">
+                  Hey {firstName}!
+                </h2>
+              </div>
+              <p className="ml-10 text-lg text-gray-300">
+                Here are some interesting stories for you today
+              </p>
+            </div>
 
-      <AlertDialog
-        onOpenChange={setShowCreditCardAlert}
-        open={showCreditCardAlert}
+            <div className="mb-6 flex space-x-2 overflow-x-auto pb-2">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  className={cn(
+                    "whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+                    category === "All"
+                      ? "bg-white text-black shadow-lg"
+                      : "border border-gray-700/50 bg-gray-800/50 text-gray-300 hover:bg-gray-700/50"
+                  )}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              {stories.map((story, idx) => (
+                <article
+                  key={story.id}
+                  className="cursor-pointer rounded-2xl border border-gray-800 bg-gray-900/70 p-5 shadow-lg transition-all hover:border-gray-600 hover:shadow-xl"
+                  style={{ animationDelay: `${idx * 100}ms` }}
+                >
+                  <div className="mb-3 flex items-start justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gray-700 shadow-lg">
+                        <User className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-white">
+                          {story.representative}
+                        </h3>
+                        <div className="flex items-center space-x-1.5 text-xs text-gray-400">
+                          <Clock className="h-3 w-3" />
+                          <span>{story.timestamp}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-gray-600/50 bg-gray-700/50 px-3 py-1.5 text-xs font-semibold text-gray-300">
+                      {story.category}
+                    </span>
+                  </div>
+
+                  <h4 className="mb-2 text-lg font-bold text-white">
+                    {story.title}
+                  </h4>
+                  <p className="mb-4 text-sm leading-relaxed text-gray-300">
+                    {story.summary}
+                  </p>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xs font-medium text-gray-400">
+                        Alignment:
+                      </span>
+                      <div className="flex items-center space-x-2">
+                        <div className="h-2 w-28 overflow-hidden rounded-full bg-gray-800/50">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all",
+                              story.alignment >= 80
+                                ? "bg-gray-200"
+                                : story.alignment >= 60
+                                ? "bg-gray-500"
+                                : "bg-gray-700"
+                            )}
+                            style={{ width: `${story.alignment}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-bold text-white">
+                          {story.alignment}%
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-sm font-semibold text-gray-400 transition-colors hover:text-gray-200"
+                    >
+                      View Details →
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="mt-8 text-center">
+              <button
+                type="button"
+                className="rounded-xl border border-gray-700/50 bg-gray-800/50 px-6 py-3 text-sm font-semibold text-gray-300 transition-all hover:bg-gray-700/50"
+              >
+                Load More Stories
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <div
+        id="relay-chat-panel"
+        className={cn(
+          "relative z-30 flex h-full flex-col overflow-hidden border-l border-gray-800 bg-gradient-to-b from-gray-950/95 via-black to-black/95 backdrop-blur-xl shadow-2xl transition-all duration-300 ease-in-out",
+          isChatExpanded
+            ? "w-96 pointer-events-auto"
+            : "w-0 pointer-events-none"
+        )}
+        aria-hidden={!isChatExpanded}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Activate AI Gateway</AlertDialogTitle>
-            <AlertDialogDescription>
-              This application requires{" "}
-              {process.env.NODE_ENV === "production" ? "the owner" : "you"} to
-              activate Vercel AI Gateway.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                window.open(
-                  "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card",
-                  "_blank"
-                );
-                window.location.href = "/";
-              }}
-            >
-              Activate
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+        {isChatExpanded && (
+          <div className="flex h-full flex-col">
+            <div className="border-b border-gray-800 bg-gray-900/50 px-5 py-4">
+              <div className="mb-1 flex items-center space-x-2">
+                <Sparkles className="h-5 w-5 text-gray-300" />
+                <h3 className="font-bold text-white">Relay</h3>
+              </div>
+              <p className="text-xs text-gray-400">
+                Your AI transparency assistant
+              </p>
+            </div>
+
+            {showSuggestions && (
+              <div className="space-y-2 px-5 py-4">
+                <p className="mb-3 text-xs font-semibold text-gray-400">
+                  SUGGESTED QUESTIONS
+                </p>
+                {suggestedQuestions.map((question) => (
+                  <button
+                    key={question}
+                    onClick={() => handleSuggestionClick(question)}
+                    className="w-full rounded-xl border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-left text-xs text-gray-200 transition-all hover:border-gray-600/50 hover:bg-gray-700/50"
+                    type="button"
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="flex flex-col space-y-3">
+                {messages.map((message) => {
+                  const textContent = message.parts
+                    .filter(isTextPart)
+                    .map((part) => part.text)
+                    .join("\n")
+                    .trim();
+
+                  const citations = message.parts
+                    .filter(isCitationPart)
+                    .map((part) => part.text);
+
+                  return (
+                    <div
+                      key={message.id}
+                      className={cn(
+                        "flex",
+                        message.role === "user"
+                          ? "justify-end"
+                          : "justify-start"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "max-w-[85%] rounded-xl px-3 py-2.5 text-sm leading-relaxed shadow-lg",
+                          message.role === "user"
+                            ? "bg-white text-black"
+                            : "border border-gray-700 bg-gray-800/70 text-gray-100"
+                        )}
+                      >
+                        {textContent && (
+                          <div className="space-y-2">
+                            {textContent.split("\n").map((line, index) => (
+                              <p key={`${message.id}-line-${index}`}>{line}</p>
+                            ))}
+                          </div>
+                        )}
+
+                        {citations.length > 0 && (
+                          <div className="mt-3 space-y-1 border-t border-gray-700/60 pt-2 text-xs">
+                            {citations.map((url, index) => (
+                              <a
+                                key={`${message.id}-citation-${index}`}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center justify-between rounded-lg bg-gray-900/70 px-2 py-1 text-gray-300 transition-colors hover:text-white"
+                              >
+                                <span>{`Source ${index + 1}`}</span>
+                                <span className="truncate pl-3 text-[11px] text-gray-400">
+                                  {getCitationLabel(url)}
+                                </span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {status === "loading" && (
+                  <div className="flex justify-start">
+                    <div className="flex items-center space-x-2 rounded-xl border border-gray-700 bg-gray-800/70 px-3 py-2 text-sm text-gray-200">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Analyzing…</span>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messageEndRef} />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-800 bg-gray-900/30 px-5 py-4">
+              <div className="flex space-x-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Ask Relay anything..."
+                  disabled={isSendDisabled}
+                  className="flex-1 rounded-xl border border-gray-700 bg-gray-800/50 px-4 py-2.5 text-sm text-white placeholder-gray-500 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={isSendDisabled}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-black shadow-lg transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                >
+                  {status === "loading" ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-black" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  <span className="sr-only">Send message</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={() => setIsChatExpanded((prev) => !prev)}
+        className="fixed bottom-6 right-4 z-40 rounded-full bg-white p-4 text-black shadow-2xl transition-transform hover:scale-110 hover:bg-gray-200"
+        type="button"
+        aria-expanded={isChatExpanded}
+        aria-controls="relay-chat-panel"
+      >
+        {isChatExpanded ? (
+          <ChevronRight className="h-5 w-5" />
+        ) : (
+          <Sparkles className="h-5 w-5" />
+        )}
+        <span className="sr-only">
+          {isChatExpanded ? "Collapse chat" : "Expand chat"}
+        </span>
+      </button>
+    </div>
   );
 }
