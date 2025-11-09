@@ -36,3 +36,31 @@ def extract_meeting_info_from_url(url):
             time_str = parts[2] if len(parts) > 2 else ''
             return {'committee': committee_code, 'date': date_str, 'time': time_str.replace('-', ':')}
     return None
+
+def extract_transcript(soup):
+    """Extract the full transcript text from the page (Robust Version)"""
+    # This robust logic is identical to the provided helper function
+    body_text = soup.get_text()
+    lines = [line.strip() for line in body_text.split('\n') if line.strip()]
+    
+    transcript_lines = []
+    start_found = False
+    
+    for line in lines:
+        if not start_found:
+            if 'SmartTranscript of' in line or re.search(r'\[.*?\]:', line):
+                start_found = True
+        
+        if start_found:
+            # Filter out known UI junk
+            if (len(line) > 10 and 
+                not line.startswith('Select text') and
+                not line.startswith('Play Clip') and
+                'This transcript was computer-produced' not in line and
+                'Like closed-captioning' not in line and
+                not line.startswith('SmartTranscript of') and
+                'Speaker IDs are still experimental' not in line and
+                'function(' not in line and 
+                'document.getElementById' not in line):
+                
+                transcript_lines.append(line)
