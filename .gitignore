@@ -56,3 +56,4 @@ __pycache__
 # removing .cursor and .vscode from repository
 .cursor
 .vscode
+.github
