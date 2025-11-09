@@ -64,3 +64,13 @@ def extract_transcript(soup):
                 'document.getElementById' not in line):
                 
                 transcript_lines.append(line)
+
+if transcript_lines:
+        if len(transcript_lines) > 5:
+            last_line = transcript_lines[-1]
+            if re.match(r'^[0-9\s\.]+$', last_line):
+                transcript_lines = transcript_lines[:-1]
+                
+        return '\n'.join(transcript_lines)
+    
+    return "Transcript extraction failed. Fallback: No text found."
