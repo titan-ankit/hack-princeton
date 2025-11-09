@@ -112,3 +112,14 @@ def scrape_single_meeting_url(task: tuple) -> tuple:
 
         # 3. Get transcript
         transcript = extract_transcript(soup)
+
+if not transcript or len(transcript) < 100:
+            # Return failure
+            return (committee_full_name, url, None, "Transcript too short or empty")
+
+        # Return success (committee_full_name is used for grouping later)
+        return (committee_full_name, url, meeting_info, transcript)
+
+    except Exception as e:
+        # Return failure
+        return (committee_full_name, url, None, str(e))
